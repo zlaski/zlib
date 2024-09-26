@@ -34,7 +34,9 @@
 #  include <stddef.h>
 #endif
 
-#if defined(__TURBOC__) || defined(_MSC_VER) || defined(_WIN32)
+#if defined __AKIBLD__
+#  include <unistd.h>
+#elif defined(__TURBOC__) || defined(_MSC_VER) || defined(_WIN32)
 #  include <io.h>
 #endif
 
