@@ -18,7 +18,14 @@ if /i "%EVENT%" == "PreLinkEvent" (
 )
 
 if /i "%EVENT%" == "PostBuildEvent" (
-    rem Implement PostBuildEvent
+    mkdir %SolutionDir%.install\%Platform%-%Configuration%\include 2>nul
+    echo %ProjectDir%zlib.h -^> %SolutionDir%.install\%Platform%-%Configuration%\include
+    echo %ProjectDir%zconf.h -^> %SolutionDir%.install\%Platform%-%Configuration%\include
+    attrib -R %SolutionDir%.install\%Platform%-%Configuration%\include\*.h >nul
+    copy /y %ProjectDir%zlib.h %SolutionDir%.install\%Platform%-%Configuration%\include >nul
+    copy /y %ProjectDir%zconf.h %SolutionDir%.install\%Platform%-%Configuration%\include >nul
+    attrib +R %SolutionDir%.install\%Platform%-%Configuration%\include\*.h
+
     exit /b 0
 )
 
