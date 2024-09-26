@@ -44,7 +44,6 @@
     <ClInclude Include="zlib.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="zlib-resources.h" />
     <ClInclude Include="crc32.h">
       <Filter>Header Files</Filter>
     </ClInclude>

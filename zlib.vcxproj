@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
@@ -9,6 +9,11 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{F258630D-231F-4B29-BA5D-6E3C2F915259}</ProjectGuid>
   </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(IntDir);$(Install_IncludePath);$(UCRT_IncludePath);$(UM_IncludePath);$(KIT_SHARED_IncludePath)\;$(KM_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="adler32.c" />
     <ClCompile Include="compress.c" />
@@ -42,7 +47,6 @@
     <ClInclude Include="inftrees.h" />
     <ClInclude Include="trees.h" />
     <ClInclude Include="zconf.h" />
-    <ClInclude Include="zlib-resources.h" />
     <ClInclude Include="zlib.h" />
     <ClInclude Include="zutil.h" />
   </ItemGroup>
