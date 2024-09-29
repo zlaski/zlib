@@ -388,17 +388,29 @@ local int updatewindow(z_streamp strm, const Bytef *end, unsigned copy) {
 
     /* copy state->wsize or less output bytes into the circular window */
     if (copy >= state->wsize) {
-        zmemcpy(state->window, end - state->wsize, state->wsize);
+        if (end != Z_NULL) {
+            zmemcpy(state->window, end - state->wsize, state->wsize);
+        } else {
+            Assert(WANT_BUFSIZE_ONLY(strm), "missing output buffer");
+        }
         state->wnext = 0;
         state->whave = state->wsize;
     }
     else {
         dist = state->wsize - state->wnext;
         if (dist > copy) dist = copy;
-        zmemcpy(state->window + state->wnext, end - copy, dist);
+        if (end != Z_NULL) {
+            zmemcpy(state->window + state->wnext, end - copy, dist);
+        } else {
+            Assert(WANT_BUFSIZE_ONLY(strm), "missing output buffer");
+        }
         copy -= dist;
         if (copy) {
-            zmemcpy(state->window, end - copy, copy);
+            if (end != Z_NULL) {
+                zmemcpy(state->window, end - copy, copy);
+            } else {
+                Assert(WANT_BUFSIZE_ONLY(strm), "missing output buffer");
+            }
             state->wnext = copy;
             state->whave = state->wsize;
         }
@@ -607,11 +619,30 @@ int ZEXPORT inflate(z_streamp strm, int flush) {
     static const unsigned short order[19] = /* permutation of code lengths */
         {16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
 
-    if (inflateStateCheck(strm) || strm->next_out == Z_NULL ||
-        (strm->next_in == Z_NULL && strm->avail_in != 0))
-        return Z_STREAM_ERROR;
+    z_stream initial_strm;               /* These are used only if  */
+    struct inflate_state initial_state;  /* WANT_BUFSIZE_ONLY(strm) */
 
-    state = (struct inflate_state FAR *)strm->state;
+    if (inflateStateCheck(strm)) {
+        return Z_STREAM_ERROR;
+    }
+    if (strm->avail_in != 0 && strm->next_in == Z_NULL) {
+        ERR_RETURN(strm, Z_STREAM_ERROR);
+    }
+
+    state = (struct inflate_state FAR*)strm->state;
+
+    if (WANT_BUFSIZE_ONLY(strm)) {
+        if (strm->avail_out != 0 || flush != Z_FINISH) {
+            ERR_RETURN(strm, Z_STREAM_ERROR);
+        }
+        strm->total_out = 0;
+        initial_strm = *strm;
+        initial_state = *state;
+        /* Fake out a practically infinite output buffer.    */
+        /* The actual buffer (strm->next_out) is still NULL. */
+        strm->avail_out = (uInt)-1;
+    }
+
     if (state->mode == TYPE) state->mode = TYPEDO;      /* skip check */
     LOAD();
     in = have;
@@ -884,7 +915,9 @@ int ZEXPORT inflate(z_streamp strm, int flush) {
                 if (copy > have) copy = have;
                 if (copy > left) copy = left;
                 if (copy == 0) goto inf_leave;
-                zmemcpy(put, next, copy);
+                if (!WANT_BUFSIZE_ONLY(strm)) {
+                    zmemcpy(put, next, copy);
+                }
                 have -= copy;
                 next += copy;
                 left -= copy;
@@ -1147,9 +1180,13 @@ int ZEXPORT inflate(z_streamp strm, int flush) {
                     if (copy > left) copy = left;
                     left -= copy;
                     state->length -= copy;
-                    do {
-                        *put++ = 0;
-                    } while (--copy);
+                    if (WANT_BUFSIZE_ONLY(strm)) {
+                        put += copy; copy = 0;
+                    } else {
+                        do {
+                            *put++ = 0;
+                        } while (--copy);
+                    }
                     if (state->length == 0) state->mode = LEN;
                     break;
 #endif
@@ -1169,14 +1206,22 @@ int ZEXPORT inflate(z_streamp strm, int flush) {
             if (copy > left) copy = left;
             left -= copy;
             state->length -= copy;
-            do {
-                *put++ = *from++;
-            } while (--copy);
+            if (WANT_BUFSIZE_ONLY(strm)) {
+                put += copy; from += copy; copy = 0;
+            } else {
+                do {
+                    *put++ = *from++;
+                } while (--copy);
+            }
             if (state->length == 0) state->mode = LEN;
             break;
         case LIT:
             if (left == 0) goto inf_leave;
-            *put++ = (unsigned char)(state->length);
+            if (WANT_BUFSIZE_ONLY(strm)) {
+                put++;
+            } else {
+                *put++ = (unsigned char)(state->length);
+            }
             left--;
             state->mode = LEN;
             break;
@@ -1186,11 +1231,11 @@ int ZEXPORT inflate(z_streamp strm, int flush) {
                 out -= left;
                 strm->total_out += out;
                 state->total += out;
-                if ((state->wrap & 4) && out)
+                if ((state->wrap & 4) && out && !WANT_BUFSIZE_ONLY(strm))
                     strm->adler = state->check =
                         UPDATE_CHECK(state->check, put - out, out);
                 out = left;
-                if ((state->wrap & 4) && (
+                if ((state->wrap & 4) && !WANT_BUFSIZE_ONLY(strm) && (
 #ifdef GUNZIP
                      state->flags ? hold :
 #endif
@@ -1208,7 +1253,8 @@ int ZEXPORT inflate(z_streamp strm, int flush) {
         case LENGTH:
             if (state->wrap && state->flags) {
                 NEEDBITS(32);
-                if ((state->wrap & 4) && hold != (state->total & 0xffffffff)) {
+                if ((state->wrap & 4) && hold != (state->total & 0xffffffff)
+                        && !WANT_BUFSIZE_ONLY(strm)) {
                     strm->msg = (char *)"incorrect length check";
                     state->mode = BAD;
                     break;
@@ -1252,7 +1298,7 @@ int ZEXPORT inflate(z_streamp strm, int flush) {
     strm->total_in += in;
     strm->total_out += out;
     state->total += out;
-    if ((state->wrap & 4) && out)
+    if ((state->wrap & 4) && out && !WANT_BUFSIZE_ONLY(strm))
         strm->adler = state->check =
             UPDATE_CHECK(state->check, strm->next_out - out, out);
     strm->data_type = (int)state->bits + (state->last ? 64 : 0) +
@@ -1260,6 +1306,16 @@ int ZEXPORT inflate(z_streamp strm, int flush) {
                       (state->mode == LEN_ || state->mode == COPY_ ? 256 : 0);
     if (((in == 0 && out == 0) || flush == Z_FINISH) && ret == Z_OK)
         ret = Z_BUF_ERROR;
+
+    if (WANT_BUFSIZE_ONLY(strm)) {
+        uInt space_needed = strm->total_out;
+        /* We are finished computing the required buffer size */
+        Assert(s->pending == 0, "not all output accounted for");
+        *strm = initial_strm;
+        *state = initial_state;
+        strm->avail_out = space_needed;
+    }
+
     return ret;
 }
 

@@ -921,9 +921,12 @@ local void flush_pending(z_streamp strm) {
     if (len > strm->avail_out) len = strm->avail_out;
     if (len == 0) return;
 
-    zmemcpy(strm->next_out, s->pending_out, len);
-    strm->next_out  += len;
-    s->pending_out  += len;
+    if (!WANT_BUFSIZE_ONLY(strm)) {
+        zmemcpy(strm->next_out, s->pending_out, len);
+        strm->next_out += len;
+    }
+    s->pending_out += len;
+
     strm->total_out += len;
     strm->avail_out -= len;
     s->pending      -= len;
@@ -947,17 +950,32 @@ int ZEXPORT deflate(z_streamp strm, int flush) {
     int old_flush; /* value of flush param for previous deflate call */
     deflate_state *s;
 
+    z_stream initial_strm;        /* These are used only if  */
+    deflate_state initial_state;  /* WANT_BUFSIZE_ONLY(strm) */
+
     if (deflateStateCheck(strm) || flush > Z_BLOCK || flush < 0) {
         return Z_STREAM_ERROR;
     }
     s = strm->state;
 
-    if (strm->next_out == Z_NULL ||
-        (strm->avail_in != 0 && strm->next_in == Z_NULL) ||
-        (s->status == FINISH_STATE && flush != Z_FINISH)) {
+    if (s->status == FINISH_STATE && flush != Z_FINISH) {
         ERR_RETURN(strm, Z_STREAM_ERROR);
     }
-    if (strm->avail_out == 0) ERR_RETURN(strm, Z_BUF_ERROR);
+    if (strm->avail_in != 0 && strm->next_in == Z_NULL) {
+        ERR_RETURN(strm, Z_STREAM_ERROR);
+    }
+    if (WANT_BUFSIZE_ONLY(strm)) {
+        if (strm->avail_out != 0 || flush != Z_FINISH
+                || s->pending != 0) {
+            ERR_RETURN(strm, Z_STREAM_ERROR);
+        }
+        strm->total_out = 0;
+        initial_strm = *strm;
+        initial_state = *s;
+        /* Fake out a practically infinite output buffer.    */
+        /* The actual buffer (strm->next_out) is still NULL. */
+        strm->avail_out = (uInt)-1;
+    }
 
     old_flush = s->last_flush;
     s->last_flush = flush;
@@ -1247,6 +1265,16 @@ int ZEXPORT deflate(z_streamp strm, int flush) {
         putShortMSB(s, (uInt)(strm->adler & 0xffff));
     }
     flush_pending(strm);
+
+    if (WANT_BUFSIZE_ONLY(strm)) {
+        uInt space_needed = strm->total_out;
+        /* We are finished computing the required buffer size */
+        Assert(s->pending == 0, "not all output accounted for");
+        *strm = initial_strm;
+        *s = initial_state;
+        strm->avail_out = space_needed;
+    }
+
     /* If avail_out is zero, the application will call deflate again
      * to flush the rest.
      */

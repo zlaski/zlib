@@ -114,7 +114,11 @@ void ZLIB_INTERNAL inflate_fast(z_streamp strm, unsigned start) {
             Tracevv((stderr, here->val >= 0x20 && here->val < 0x7f ?
                     "inflate:         literal '%c'\n" :
                     "inflate:         literal 0x%02x\n", here->val));
-            *out++ = (unsigned char)(here->val);
+            if (WANT_BUFSIZE_ONLY(strm)) {
+                out++;
+            } else {
+                *out++ = (unsigned char)(here->val);
+            }
         }
         else if (op & 16) {                     /* length base */
             len = (unsigned)(here->val);
@@ -175,20 +179,32 @@ void ZLIB_INTERNAL inflate_fast(z_streamp strm, unsigned start) {
                         }
 #ifdef INFLATE_ALLOW_INVALID_DISTANCE_TOOFAR_ARRR
                         if (len <= op - whave) {
-                            do {
-                                *out++ = 0;
-                            } while (--len);
+                            if (WANT_BUFSIZE_ONLY(strm)) {
+                                out += len; len = 0;
+                            } else {
+                                do {
+                                    *out++ = 0;
+                                } while (--len);
+                            }
                             continue;
                         }
                         len -= op - whave;
-                        do {
-                            *out++ = 0;
-                        } while (--op > whave);
+                        if (WANT_BUFSIZE_ONLY(strm)) {
+                            out += (op - whave); op = whave;
+                        } else {
+                            do {
+                                *out++ = 0;
+                            } while (--op > whave);
+                        }
                         if (op == 0) {
                             from = out - dist;
-                            do {
-                                *out++ = *from++;
-                            } while (--len);
+                            if (WANT_BUFSIZE_ONLY(strm)) {
+                                out += len; from += len; len = 0;
+                            } else {
+                                do {
+                                    *out++ = *from++;
+                                } while (--len);
+                            }
                             continue;
                         }
 #endif
@@ -198,9 +214,13 @@ void ZLIB_INTERNAL inflate_fast(z_streamp strm, unsigned start) {
                         from += wsize - op;
                         if (op < len) {         /* some from window */
                             len -= op;
-                            do {
-                                *out++ = *from++;
-                            } while (--op);
+                            if (WANT_BUFSIZE_ONLY(strm)) {
+                                out += op; from += op; op = 0;
+                            } else {
+                                do {
+                                    *out++ = *from++;
+                                } while (--op);
+                            }
                             from = out - dist;  /* rest from output */
                         }
                     }
@@ -209,16 +229,24 @@ void ZLIB_INTERNAL inflate_fast(z_streamp strm, unsigned start) {
                         op -= wnext;
                         if (op < len) {         /* some from end of window */
                             len -= op;
-                            do {
-                                *out++ = *from++;
-                            } while (--op);
+                            if (WANT_BUFSIZE_ONLY(strm)) {
+                                out += op; from += op; op = 0;
+                            } else {
+                                do {
+                                    *out++ = *from++;
+                                } while (--op);
+                            }
                             from = window;
                             if (wnext < len) {  /* some from start of window */
                                 op = wnext;
                                 len -= op;
-                                do {
-                                    *out++ = *from++;
-                                } while (--op);
+                                if (WANT_BUFSIZE_ONLY(strm)) {
+                                    out += op; from += op; op = 0;
+                                } else {
+                                    do {
+                                        *out++ = *from++;
+                                    } while (--op);
+                                }
                                 from = out - dist;      /* rest from output */
                             }
                         }
@@ -227,36 +255,48 @@ void ZLIB_INTERNAL inflate_fast(z_streamp strm, unsigned start) {
                         from += wnext - op;
                         if (op < len) {         /* some from window */
                             len -= op;
-                            do {
-                                *out++ = *from++;
-                            } while (--op);
+                            if (WANT_BUFSIZE_ONLY(strm)) {
+                                out += op; from += op; op = 0;
+                            } else {
+                                do {
+                                    *out++ = *from++;
+                                } while (--op);
+                            }
                             from = out - dist;  /* rest from output */
                         }
                     }
-                    while (len > 2) {
-                        *out++ = *from++;
-                        *out++ = *from++;
-                        *out++ = *from++;
-                        len -= 3;
-                    }
-                    if (len) {
-                        *out++ = *from++;
-                        if (len > 1)
+                    if (WANT_BUFSIZE_ONLY(strm)) {
+                        out += len; from += len; len %= 3;
+                    } else {
+                        while (len > 2) {
                             *out++ = *from++;
+                            *out++ = *from++;
+                            *out++ = *from++;
+                            len -= 3;
+                        }
+                        if (len) {
+                            *out++ = *from++;
+                            if (len > 1)
+                                *out++ = *from++;
+                        }
                     }
                 }
                 else {
                     from = out - dist;          /* copy direct from output */
-                    do {                        /* minimum length is three */
-                        *out++ = *from++;
-                        *out++ = *from++;
-                        *out++ = *from++;
-                        len -= 3;
-                    } while (len > 2);
-                    if (len) {
-                        *out++ = *from++;
-                        if (len > 1)
+                    if (WANT_BUFSIZE_ONLY(strm)) {
+                        out += len; from += len; len %= 3;
+                    } else {
+                        do {                        /* minimum length is three */
                             *out++ = *from++;
+                            *out++ = *from++;
+                            *out++ = *from++;
+                            len -= 3;
+                        } while (len > 2);
+                        if (len) {
+                            *out++ = *from++;
+                            if (len > 1)
+                                *out++ = *from++;
+                        }
                     }
                 }
             }
@@ -292,9 +332,12 @@ void ZLIB_INTERNAL inflate_fast(z_streamp strm, unsigned start) {
     bits -= len << 3;
     hold &= (1U << bits) - 1;
 
+    if (!WANT_BUFSIZE_ONLY(strm)) {
+        strm->next_out = out;
+    }
+
     /* update state and return */
     strm->next_in = in;
-    strm->next_out = out;
     strm->avail_in = (unsigned)(in < last ? 5 + (last - in) : 5 - (in - last));
     strm->avail_out = (unsigned)(out < end ?
                                  257 + (end - out) : 257 - (out - end));

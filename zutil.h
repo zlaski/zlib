@@ -87,6 +87,9 @@ extern z_const char * const z_errmsg[10]; /* indexed by 2-zlib_error */
 
 #define PRESET_DICT 0x20 /* preset dictionary flag in zlib header */
 
+#define WANT_BUFSIZE_ONLY(strm) (strm->next_out == Z_NULL)
+/* Used when we are only interested in strm->avail_out */
+
         /* target dependencies */
 
 #if defined(MSDOS) || (defined(WINDOWS) && !defined(WIN32))
